@@ -22,3 +22,8 @@ xv6.out*
 submissions/
 ph
 barrier
+.cache/clangd/index
+.clangd/index
+.vscode
+.gdb_history
+compile_commands.json
