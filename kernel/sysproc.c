@@ -7,6 +7,7 @@
 #include "spinlock.h"
 #include "proc.h"
 #include "syscall.h"
+#include "sysinfo.h"
 
 uint64
 sys_exit(void)
@@ -105,4 +106,23 @@ sys_trace(void)
     return -1;
   myproc()->trace_mask = trace_mark;
   return 0;
+}
+
+uint64
+sys_sysinfo(void)
+{
+  uint64 addr;
+  struct sysinfo si;
+  int free_cnt, proc_cnt;
+  if (argaddr(0, &addr) < 0)
+    return -1;
+
+  free_cnt = free_count();
+  proc_cnt = proccount();
+
+  si.nproc = proc_cnt;
+  si.freemem = free_cnt;
+  if (copyout(myproc()->pagetable, addr, (char *)&si, sizeof(si)) < 0)
+    return -1;
+  return 0; 
 }
