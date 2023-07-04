@@ -460,3 +460,19 @@ vmprint(pagetable_t pagetable)
   _vmprint(pagetable, 2);
 }
 
+void
+pgaccess(pagetable_t pagetable, uint64 base, int len, uint64 mask)
+{
+  uint64 va = PGROUNDDOWN(base);
+  pte_t *pte;
+  unsigned int mask_k = 0;
+  for (int i = 0; i < len; i++) {
+    if ((pte = walk(pagetable, va + i*PGSIZE, 0)) == 0)
+      panic("pgaccess: walk");
+    if ((*pte & PTE_A)) {
+      mask_k |= 1 << i;
+      *pte &= (uint64)~PTE_A;
+    }
+  }
+  copyout(pagetable, mask, (char *)&mask_k, sizeof(mask_k));
+}
