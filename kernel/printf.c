@@ -132,3 +132,18 @@ printfinit(void)
   initlock(&pr.lock, "pr");
   pr.locking = 1;
 }
+
+void
+backtrace(void)
+{
+  uint64 ra;
+  uint64 fp = r_fp();
+  printf("backtrace:\n");
+  while (PGROUNDUP(fp) == myproc()->kstack + PGSIZE) {
+    ra = *(uint64 *)(fp - 8);
+    fp = *(uint64 *)(fp - 16);
+    if (ra < 0x8000000)
+      break;
+    printf("%p\n", ra);
+  }
+}
