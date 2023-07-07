@@ -1,0 +1,7 @@
+1. a0 - a7 contains function arguments
+
+2. the call from f to g is inlined, the call from main to f is optimized by the compiler.
+
+3. the address of printf: 0x616
+
+4. 0x38
