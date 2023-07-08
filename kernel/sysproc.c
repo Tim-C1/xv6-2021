@@ -7,6 +7,7 @@
 #include "spinlock.h"
 #include "proc.h"
 
+extern int in_handler;
 uint64
 sys_exit(void)
 {
@@ -95,4 +96,28 @@ sys_uptime(void)
   xticks = ticks;
   release(&tickslock);
   return xticks;
+}
+
+uint64
+sys_sigalarm(void)
+{
+  int ticks;
+  void (*handler)();
+
+  if (argint(0, &ticks) < 0)
+    return -1;
+  if (argaddr(1, (uint64 *)&handler))
+    return -1;
+  myproc() -> ticks = ticks;
+  myproc() -> handler = handler;
+  return 0;
+}
+
+uint64
+sys_sigreturn(void)
+{
+  memmove(myproc()->trapframe, myproc()->trapframe_before_sig, 280);
+  if (in_handler)
+    in_handler = 0;
+  return myproc()->trapframe->a0;
 }

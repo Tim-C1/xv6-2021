@@ -6,6 +6,7 @@
 #include "proc.h"
 #include "defs.h"
 
+int in_handler = 0;
 struct spinlock tickslock;
 uint ticks;
 
@@ -67,6 +68,18 @@ usertrap(void)
     syscall();
   } else if((which_dev = devintr()) != 0){
     // ok
+    if (which_dev == 2) {
+      // handle timer interrupt
+      myproc()->ticks_passed += 1;
+      if (myproc()->ticks_passed >= myproc()->ticks) {
+        if (!in_handler) {
+          in_handler = 1;
+          myproc()->ticks_passed = 0;
+          memmove(myproc()->trapframe_before_sig, myproc()->trapframe, 280);
+          myproc()->trapframe->epc = (uint64)myproc()->handler;
+        }
+      }
+    }
   } else {
     printf("usertrap(): unexpected scause %p pid=%d\n", r_scause(), p->pid);
     printf("            sepc=%p stval=%p\n", r_sepc(), r_stval());
