@@ -70,13 +70,15 @@ usertrap(void)
     // ok
     if (which_dev == 2) {
       // handle timer interrupt
-      myproc()->ticks_passed += 1;
-      if (myproc()->ticks_passed >= myproc()->ticks) {
-        if (!in_handler) {
-          in_handler = 1;
-          myproc()->ticks_passed = 0;
-          memmove(myproc()->trapframe_before_sig, myproc()->trapframe, 280);
-          myproc()->trapframe->epc = (uint64)myproc()->handler;
+      if (myproc()->ticks != 0) {
+        myproc()->ticks_passed += 1;
+        if (myproc()->ticks_passed >= myproc()->ticks) {
+          if (!in_handler) {
+            in_handler = 1;
+            myproc()->ticks_passed = 0;
+            memmove(myproc()->trapframe_before_sig, myproc()->trapframe, 280);
+            myproc()->trapframe->epc = (uint64)myproc()->handler;
+          }
         }
       }
     }
