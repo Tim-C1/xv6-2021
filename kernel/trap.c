@@ -82,6 +82,24 @@ usertrap(void)
         }
       }
     }
+  } else if (r_scause() == 13 || r_scause() == 15) {
+    uint64 va = r_stval();
+    // va is higher than process size
+    // va is below user stack
+    if (va >= p->sz || va < PGROUNDUP(p->trapframe->sp))
+      exit(-1);
+
+    char *mem = kalloc();
+    if (mem) {
+      memset(mem, 0, PGSIZE);
+    } else {
+      exit(-1);
+    }
+
+    if (mappages(p->pagetable, PGROUNDDOWN(va), PGSIZE, (uint64)mem, PTE_W|PTE_X|PTE_R|PTE_U) != 0) {
+      kfree(mem);
+      p->killed = 1;
+    }
   } else {
     printf("usertrap(): unexpected scause %p pid=%d\n", r_scause(), p->pid);
     printf("            sepc=%p stval=%p\n", r_sepc(), r_stval());
