@@ -67,6 +67,35 @@ usertrap(void)
     syscall();
   } else if((which_dev = devintr()) != 0){
     // ok
+  } else if (r_scause() == 15) {
+    // handle page fault for COW, COW should only generate store pagefault on COW pages
+    uint64 va = r_stval();
+    if (va > myproc()->sz)
+      exit(-1);
+
+    if (!incowpage(va)) {
+      panic("unexpected store pagefault\n");
+    }
+
+    // handle COW store pagefault
+    pte_t *pte = walk(myproc()->pagetable, va, 0);
+    if (pte == 0)
+      panic("COW pte should be valid");
+
+    uint64 mem = (uint64)kalloc();
+    if (mem == 0) {
+      exit(-1);
+    }
+    memmove((char *)mem, (char *)PTE2PA(*pte), PGSIZE);
+
+    // update the empty pte to new physical page and W bit set
+    int flags = PTE_FLAGS(*pte) | PTE_W;
+
+    // remove the old PTE of COW pagefault, this will decrease the ref count
+    kfree((void *)PTE2PA(*pte));
+    // remove the COW mark on PTE since we create a new physical page
+    *pte = PA2PTE(mem) | flags;
+    *pte = *pte & ~PTE_COW;
   } else {
     printf("usertrap(): unexpected scause %p pid=%d\n", r_scause(), p->pid);
     printf("            sepc=%p stval=%p\n", r_sepc(), r_stval());

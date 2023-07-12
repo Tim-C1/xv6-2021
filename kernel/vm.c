@@ -5,6 +5,8 @@
 #include "riscv.h"
 #include "defs.h"
 #include "fs.h"
+#include "spinlock.h"
+#include "proc.h"
 
 /*
  * the kernel's page table.
@@ -303,20 +305,25 @@ uvmcopy(pagetable_t old, pagetable_t new, uint64 sz)
   pte_t *pte;
   uint64 pa, i;
   uint flags;
-  char *mem;
 
   for(i = 0; i < sz; i += PGSIZE){
     if((pte = walk(old, i, 0)) == 0)
       panic("uvmcopy: pte should exist");
     if((*pte & PTE_V) == 0)
       panic("uvmcopy: page not present");
+    // clear W flag for parent and child
+    *pte = (*pte) & ~PTE_W;
+    flags = PTE_FLAGS(*pte) & ~PTE_W;
+
+    // mark parent and child PTE as COW
+    *pte = (*pte) | PTE_COW;
+    flags |= PTE_COW;
+
+    // create child PTEs that share parent's physical pages
     pa = PTE2PA(*pte);
-    flags = PTE_FLAGS(*pte);
-    if((mem = kalloc()) == 0)
-      goto err;
-    memmove(mem, (char*)pa, PGSIZE);
-    if(mappages(new, i, PGSIZE, (uint64)mem, flags) != 0){
-      kfree(mem);
+    // increase ref count on this share physical page
+    inc_refcount((void *)pa);
+    if(mappages(new, i, PGSIZE, pa, flags) != 0){
       goto err;
     }
   }
@@ -349,8 +356,37 @@ copyout(pagetable_t pagetable, uint64 dstva, char *src, uint64 len)
   uint64 n, va0, pa0;
 
   while(len > 0){
+    if (dstva >= MAXVA)
+      return -1;
     va0 = PGROUNDDOWN(dstva);
-    pa0 = walkaddr(pagetable, va0);
+    // handle COW page
+    if (incowpage(va0)) {
+      // handle COW store pagefault
+      pte_t *pte = walk(myproc()->pagetable, va0, 0);
+      if (pte == 0) 
+        return -1;
+
+      uint64 mem = (uint64)kalloc();
+      if (mem == 0) {
+        // TODO why use exit(-1) will cause memory leak ???
+        return -1;
+      }
+      memmove((char *)mem, (char *)PTE2PA(*pte), PGSIZE);
+
+      // update the empty pte to new physical page and W bit set
+      int flags = PTE_FLAGS(*pte) | PTE_W;
+
+      // remove the old PTE of COW pagefault
+      kfree((void *)PTE2PA(*pte));
+
+      // remove the COW mark on PTE since we create a new physical page
+      *pte = PA2PTE(mem) | flags;
+      *pte = *pte & ~PTE_COW;
+
+      pa0 = mem;
+    } else {
+      pa0 = walkaddr(pagetable, va0);
+    }
     if(pa0 == 0)
       return -1;
     n = PGSIZE - (dstva - va0);
@@ -431,4 +467,43 @@ copyinstr(pagetable_t pagetable, char *dst, uint64 srcva, uint64 max)
   } else {
     return -1;
   }
+}
+
+// Whether a pagefault pa happens on a COW page
+int
+incowpage(uint64 va)
+{
+  pte_t *pte = walk(myproc()->pagetable, va, 0);
+  if (pte == 0)
+    return -1;
+
+  // printf("pte: %p\n", *pte);
+  return *pte & PTE_COW;
+}
+
+// print a pagetable rv 39 format
+void
+_vmprint(pagetable_t pagetable, int level)
+{
+  for (int i = 0; i < 512; i++) {
+    pte_t pte = pagetable[i];
+    if (pte & PTE_V) {
+      if (level == 2) {
+        printf("..%d: pte %p pa %p\n", i, pte, PTE2PA(pte));
+        _vmprint((pagetable_t)PTE2PA(pte), 1);
+      } else if (level == 1) {
+        printf(".. ..%d: pte %p pa %p\n", i, pte, PTE2PA(pte));
+        _vmprint((pagetable_t)PTE2PA(pte), 0);
+      } else {
+        printf(".. .. ..%d: pte %p pa %p\n", i, pte, PTE2PA(pte));
+      }
+    }
+  }
+}
+
+void
+vmprint(pagetable_t pagetable)
+{
+  printf("page table %p\n", pagetable);
+  _vmprint(pagetable, 2);
 }
