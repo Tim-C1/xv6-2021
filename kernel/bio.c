@@ -67,20 +67,20 @@ bget(uint dev, uint blockno)
 
   // Is the block already cached?
   uint id = HASH(blockno);
-  acquire(&bcache.lock);
-  // acquire(&bcache.bucket_locks[id]);
+  acquire(&bcache.bucket_locks[id]);
   for (b = bcache.buckets[id].next; b != 0; b = b->next) {
     if (b->blockno == blockno && b->dev == dev) {
       b->refcnt++;
-      // release(&bcache.bucket_locks[id]);
+      release(&bcache.bucket_locks[id]);
       acquiresleep(&b->lock);
-      release(&bcache.lock);
       return b;
     }
   }
+  release(&bcache.bucket_locks[id]);
   // release(&bcache.bucket_locks[id]);
   // Not cached.
   // Find the least recently used buffer in all buckets
+  acquire(&bcache.lock);
   for (int i = 0; i < NBUCKET; i++) {
     struct buf *pre = &bcache.buckets[i];
     // maybe another process has already evinct a new buffer for this bucket when we release the bucket lock, so we check again
@@ -88,12 +88,11 @@ bget(uint dev, uint blockno)
       for (b = bcache.buckets[id].next; b != 0; b = b->next) {
         if (b->blockno == blockno && b->dev == dev) {
           b->refcnt++;
-          acquiresleep(&b->lock);
           release(&bcache.lock);
+          acquiresleep(&b->lock);
           return b;
         }
       }
-      continue;
     }
     for (b = bcache.buckets[i].next; b != 0; b = b->next) {
       if (b->refcnt == 0 && b->lastuse_ticks < least_ticks) {
@@ -118,8 +117,8 @@ bget(uint dev, uint blockno)
     b_lru->blockno = blockno;
     b_lru->valid = 0;
     b_lru->refcnt = 1;
-    acquiresleep(&b_lru->lock);
     release(&bcache.lock);
+    acquiresleep(&b_lru->lock);
     return b_lru;
   } else {
     panic("bget: no buffers");
