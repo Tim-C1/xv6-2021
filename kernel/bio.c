@@ -77,7 +77,6 @@ bget(uint dev, uint blockno)
     }
   }
   release(&bcache.bucket_locks[id]);
-  // release(&bcache.bucket_locks[id]);
   // Not cached.
   // Find the least recently used buffer in all buckets
   acquire(&bcache.lock);
@@ -87,7 +86,9 @@ bget(uint dev, uint blockno)
     if (i == id) {
       for (b = bcache.buckets[id].next; b != 0; b = b->next) {
         if (b->blockno == blockno && b->dev == dev) {
+          acquire(&bcache.bucket_locks[id]);
           b->refcnt++;
+          release(&bcache.bucket_locks[id]);
           release(&bcache.lock);
           acquiresleep(&b->lock);
           return b;
