@@ -286,11 +286,12 @@ create(char *path, short type, short major, short minor)
 uint64
 sys_open(void)
 {
-  char path[MAXPATH];
+  char path[MAXPATH], target[MAXPATH];
   int fd, omode;
   struct file *f;
   struct inode *ip;
   int n;
+  int sym_cnt = 0;
 
   if((n = argstr(0, path, MAXPATH)) < 0 || argint(1, &omode) < 0)
     return -1;
@@ -313,6 +314,25 @@ sys_open(void)
       iunlockput(ip);
       end_op();
       return -1;
+    }
+    if(ip->type == T_SYMLINK && !(omode & O_NOFOLLOW)){
+      while(ip->type == T_SYMLINK){
+        if(readi(ip, 0, (uint64)target, 0, sizeof(target)) != sizeof(target)){
+          panic("readi: symlink does not contains a target path");
+        }
+        printf("target: %s\n", target);
+        iunlockput(ip);
+        if((ip = namei(target)) == 0){
+          end_op();
+          return -1;
+        }
+        ilock(ip);
+        if((sym_cnt++) == 10){
+          iunlockput(ip);
+          end_op();
+          return -1;
+        }
+      }
     }
   }
 
@@ -482,5 +502,30 @@ sys_pipe(void)
     fileclose(wf);
     return -1;
   }
+  return 0;
+}
+
+uint64
+sys_symlink(void)
+{
+  char target[MAXPATH], path[MAXPATH];
+  int n;
+  struct inode *ip;
+  if((n = argstr(0, target, MAXPATH)) < 0 || argstr(1, path, MAXPATH) < 0)
+    return -1;
+
+  begin_op();
+  if(!(ip = create(path, T_SYMLINK, 0, 0))){
+    // fail to create a symlink inode
+    end_op();
+    return -1;
+  }
+  if(writei(ip, 0, (uint64)&target, 0, sizeof(target)) < sizeof(target)){
+    end_op();
+    return -1;
+  };
+  iunlockput(ip); // create locked ip
+
+  end_op();
   return 0;
 }
