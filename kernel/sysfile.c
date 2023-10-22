@@ -15,6 +15,7 @@
 #include "sleeplock.h"
 #include "file.h"
 #include "fcntl.h"
+#include "memlayout.h"
 
 // Fetch the nth word-sized system call argument as a file descriptor
 // and return both the descriptor and the corresponding struct file.
@@ -482,5 +483,101 @@ sys_pipe(void)
     fileclose(wf);
     return -1;
   }
+  return 0;
+}
+
+uint64
+sys_mmap(void)
+{
+  uint length;
+  int prot;
+  int flags;
+  int fd;
+  struct file *f;
+  uint offset;
+
+  if(argint(1, (int *)&length) < 0)
+    return -1;
+  if(argint(2, &prot) < 0)
+    return -1;
+  if(argint(3, &flags) < 0)
+    return -1;
+  if(argfd(4, &fd, &f) < 0)
+    return -1;
+  if(argint(5, (int *)&offset) < 0)
+    return -1;
+
+  if(!f->writable && (prot & PROT_WRITE) && !(flags & MAP_PRIVATE))
+    return -1;
+  int i;
+  struct proc *p = myproc();
+  struct vma *vma = 0;
+  // first call to mmap, initialize vmaend
+  if (p->vmaend == 0)
+    p->vmaend = VMAEND;
+  for (i = 0; i < NOVMA; i += 1) {
+    // find a empty vma slot
+    if (p->vmas[i].valid == 0) {
+      vma = &p->vmas[i];
+      vma->begin = p->vmaend - length;
+      p->vmaend = PGROUNDDOWN(vma->begin);
+      vma->length = length;
+      vma->prot = prot;
+      vma->flags = flags; // shared or private
+      vma->mfile = filedup(f);
+      vma->offset = offset;
+      vma->valid = 1;
+      break;
+    }
+  }
+  if (!vma)
+    return -1;
+  return vma->begin;
+}
+
+uint64
+sys_munmap(void)
+{
+  uint64 va;
+  uint length;
+  
+  if (argaddr(0, &va) < 0)
+    return -1;
+  if (argint(1, (int *)&length) < 0)
+    return -1;
+
+  struct vma *vma = 0;
+  struct proc *p = myproc();
+  for (int i = 0; i < NOVMA; i++) {
+    if (va >= p->vmas[i].begin && va < p->vmas[i].begin + p->vmas[i].length) {
+      vma = &p->vmas[i];
+      break;
+    }
+  }
+  if (!vma)
+    panic("sys_munmap: invalid address for munmap");
+
+  uint free_pages;
+  int free_all = 0;
+  if (va + length >= vma->begin + vma->length) {
+    free_all = 1;
+  }
+  free_pages = (PGROUNDUP(va + length) - PGROUNDDOWN(va)) / PGSIZE;
+  if (vma->flags & MAP_SHARED) {
+    // .. unchecked
+    filewrite(vma->mfile, va, length);
+  }
+  for (int i = 0; i < free_pages; i++) {
+    uint64 map_va_page = PGROUNDDOWN(va) + i*PGSIZE;
+    if (walkaddr(p->pagetable, map_va_page)) {
+      uvmunmap(p->pagetable, map_va_page, 1, 1);
+    }
+  }
+
+  if (free_all) {
+    fileclose(vma->mfile);
+    vma->valid = 0;
+  }
+
   return 0;
 }

@@ -5,6 +5,10 @@
 #include "spinlock.h"
 #include "proc.h"
 #include "defs.h"
+#include "fcntl.h"
+#include "fs.h"
+#include "sleeplock.h"
+#include "file.h"
 
 struct spinlock tickslock;
 uint ticks;
@@ -67,6 +71,41 @@ usertrap(void)
     syscall();
   } else if((which_dev = devintr()) != 0){
     // ok
+  } else if (r_scause() == 13 || r_scause() == 15) {
+    uint64 va = r_stval();
+    if (va >= TRAPFRAME || va < PGROUNDUP(p->trapframe->sp)) {
+      exit(-1);
+    }
+    struct vma *vma = 0;
+    for (int i = 0; i < NOVMA; i++) {
+      if (va >= p->vmas[i].begin && va < p->vmas[i].begin + p->vmas[i].length) {
+        vma = &p->vmas[i];
+        break;
+      }
+    }
+    if (!vma)
+      panic("trap: invalid address for mmap");
+    void *pa = kalloc();
+    if(pa == 0) {
+      panic("trap mmap: kalloc");
+    }
+    memset(pa, 0, PGSIZE);
+    begin_op();
+    ilock(vma->mfile->ip);
+    readi(vma->mfile->ip, 0, (uint64)pa, vma->offset + PGROUNDDOWN(va - vma->begin), PGSIZE);
+    iunlock(vma->mfile->ip);
+    end_op();
+    int perm = PTE_U;
+    if(vma->prot & PROT_READ)
+      perm |= PTE_R;
+    if(vma->prot & PROT_WRITE)
+      perm |= PTE_W;
+    if(vma->prot & PROT_EXEC)
+      perm |= PTE_X;
+
+    if(mappages(p->pagetable, va, PGSIZE, (uint64)pa,  perm) < 0) {
+      panic("trap mmap: mappages");
+    }
   } else {
     printf("usertrap(): unexpected scause %p pid=%d\n", r_scause(), p->pid);
     printf("            sepc=%p stval=%p\n", r_sepc(), r_stval());

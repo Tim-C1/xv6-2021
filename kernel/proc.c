@@ -289,6 +289,12 @@ fork(void)
   }
   np->sz = p->sz;
 
+  for (int i = 0; i < NOVMA; i++) {
+    if (p->vmas[i].valid) {
+      np->vmas[i] = *(&p->vmas[i]);
+      filedup(np->vmas[i].mfile);
+    }
+  }
   // copy saved user registers.
   *(np->trapframe) = *(p->trapframe);
 
@@ -353,6 +359,22 @@ exit(int status)
     }
   }
 
+  struct vma *vma = 0;
+  uint free_pages;
+  for(int i = 0; i < NOVMA; i++) {
+    vma = &p->vmas[i];
+    if (vma->valid) {
+      free_pages = (PGROUNDUP(vma->begin + vma->length) - PGROUNDDOWN(vma->begin)) / PGSIZE;
+      for (int j = 0; j < free_pages; j++) {
+        uint64 map_va_page = PGROUNDDOWN(vma->begin) + j*PGSIZE;
+        if (walkaddr(p->pagetable, map_va_page)) {
+          uvmunmap(p->pagetable, map_va_page, 1, 1);
+        }
+      }
+      fileclose(vma->mfile);
+      vma->valid = 0;
+    }
+  }
   begin_op();
   iput(p->cwd);
   end_op();
